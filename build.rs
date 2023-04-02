@@ -17,21 +17,25 @@ fn main() {
     let headers_path = libdir_path.join("sofia_app.h");
 
     println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
-    println!("cargo:rustc-link-lib=sofia_app");
+    println!("cargo:rustc-link-lib=static=sofia_app");
+    println!("cargo:rustc-link-lib=static=ssl");
+    println!("cargo:rustc-link-lib=static=crypto");
     //we have libsofia-sip-ua.a
     //without static= not works
     println!("cargo:rustc-link-lib=static=sofia-sip-ua");
 
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed={}", "sofia_app/sofia_app.h");
+    println!("cargo:rerun-if-changed={}", "sofia_app/sofia_app.c");
 
     cc::Build::new()
         .file("sofia_app/sofia_app.c")
         .include(sofia_library_path)
         .static_flag(true)
-        .compile("sofia_app");
+        .compile("libsofia_app.a");
 
     let bindings = bindgen::Builder::default()
+        .clang_arg("-I/usr/include/sofia-sip-1.12")
         // The input header we would like to generate
         // bindings for.
         .header(headers_path.to_str().unwrap())
