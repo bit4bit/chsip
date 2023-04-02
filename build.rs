@@ -2,38 +2,42 @@ extern crate bindgen;
 
 use std::collections::HashSet;
 use std::env;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
+use bindgen::CargoCallbacks;
+
+// DERIVADO DE: https://rust-lang.github.io/rust-bindgen/tutorial-3.html
 fn main() {
-    let ignored_macros = IgnoreMacros(
-            vec![
-                "IPPORT_RESERVED".into(),
-            ]
-            .into_iter()
-            .collect(),
-        );
+    
+    let sofia_library_path = Path::new("/usr/include/sofia-sip-1.12");
 
-    // DERIVADO DE: https://rust-lang.github.io/rust-bindgen/tutorial-3.html
+    let libdir_path = PathBuf::from("sofia_app")
+        .canonicalize()
+        .expect("cannot canonicalize path");
+    let headers_path = libdir_path.join("sofia_app.h");
 
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
-    println!("cargo:rustc-link-lib=sofia-sip-ua");
+    println!("cargo:rustc-link-search={}", libdir_path.to_str().unwrap());
+    println!("cargo:rustc-link-lib=sofia_app");
+    //we have libsofia-sip-ua.a
+    //without static= not works
+    println!("cargo:rustc-link-lib=static=sofia-sip-ua");
 
     // Tell cargo to invalidate the built crate whenever the wrapper changes
-    println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rerun-if-changed={}", "sofia_app/sofia_app.h");
 
-    // The bindgen::Builder is the main entry point
-    // to bindgen, and lets you build up options for
-    // the resulting bindings.
+    cc::Build::new()
+        .file("sofia_app/sofia_app.c")
+        .include(sofia_library_path)
+        .static_flag(true)
+        .compile("sofia_app");
+
     let bindings = bindgen::Builder::default()
-        .clang_arg("-I/usr/include/sofia-sip-1.12/")
         // The input header we would like to generate
         // bindings for.
-        .header("wrapper.h")
-        .opaque_type("msg_hclass.*")
-        //ISSUE: https://github.com/rust-lang/rust-bindgen/issues/687
-        //`IPPORT_RESERVED` redefined here
-        .parse_callbacks(Box::new(ignored_macros))
+        .header(headers_path.to_str().unwrap())
+        // Tell cargo to invalidate the built crate whenever any of the
+        // included header files changed.
+        .parse_callbacks(Box::new(CargoCallbacks))
         // Finish the builder and generate the bindings.
         .generate()
         // Unwrap the Result and panic on failure.
