@@ -71,11 +71,10 @@ bool sofia_app_init(sofia_app_t *app, sofia_app_details_t *details) {
   if (!app->root)
     return false;
 
-  const char *bindurl = "sip:localhost:5080";
   app->nua = nua_create(app->root,
                         sofia_app_nua_callback,
                         app,
-                        NUTAG_URL(bindurl),
+                        NUTAG_URL(details->bindurl),
                         TAG_NULL());
   if (!app->nua)
     return false;
