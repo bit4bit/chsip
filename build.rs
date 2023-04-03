@@ -37,6 +37,8 @@ fn main() {
         .compile("libsofia_app.a");
 
     let bindings = bindgen::Builder::default()
+        .blocklist_type("sofia_app_handle_incoming_cb")
+        .blocklist_function("sofia_app_init")
         // The input header we would like to generate
         // bindings for.
         .header(headers_path.to_str().unwrap())

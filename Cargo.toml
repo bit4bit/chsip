@@ -7,6 +7,12 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.27.0", features = ["full"] }
+log = "0.4"
+libc = "0.2"
+
+[dependencies.simple_logger]
+default-features = false
+features = ["timestamps"]
 
 [build-dependencies]
 bindgen = "0.64.0"

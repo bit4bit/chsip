@@ -11,10 +11,15 @@ typedef struct sofia_app application;
 
 #include "sofia_app.h"
 
+
 struct sofia_app {
   su_home_t home;
   su_root_t *root;
   nua_t *nua;
+  sofia_app_handle_incoming_cb *handle_incoming;
+  void *handle_incoming_user_data;
+
+  char *bindurl;
 };
 
 
@@ -29,6 +34,10 @@ void sofia_app_nua_callback(
                             sip_t const *sip,
                             tagi_t tags[])
 {
+
+  if (app->handle_incoming) {
+    app->handle_incoming(event, status, phrase, app->handle_incoming_user_data);
+  }
 
   printf("event %d: %03d %s\n", event, status, phrase);
   tl_print(stdout, "", tags);
@@ -48,33 +57,32 @@ void sofia_app_iterate(sofia_app_t *app, long interval_us) {
   su_root_sleep(app->root, interval_us);
 }
 
-sofia_app_details_t *sofia_app_details_create(sofia_app_t *app)
-{
-  sofia_app_details_t *details = (sofia_app_details_t *) su_alloc(&app->home, sizeof(sofia_app_details_t));
-  details->bindurl = su_sprintf(&app->home, "sip:localhost:5060");
-  return details;
-}
-
-void sofia_app_details_set_bindhost(sofia_app_details_t *details, const char *host, int port) {
-  details->bindurl = su_sprintf(&details->app->home, "sip:%s:%d", host, port);
-}
-
 // allocation
 sofia_app_t *sofia_app_create() {
-  return (sofia_app_t*) malloc(sizeof(sofia_app_t));
+  sofia_app_t *app = (sofia_app_t*) malloc(sizeof(sofia_app_t));
+  app->bindurl = NULL;
+  app->handle_incoming = NULL;
+  return app;
 }
 
-bool sofia_app_init(sofia_app_t *app, sofia_app_details_t *details) {
+bool sofia_app_init(sofia_app_t *app,
+                    const char *bindhost,
+                    int bindport,
+                    sofia_app_handle_incoming_cb *handle_incoming,
+                    void *handle_incoming_user_data) {
   su_init();
   su_home_init(&app->home);
   app->root = su_root_create(app);
   if (!app->root)
     return false;
 
+  app->handle_incoming = handle_incoming;
+  app->handle_incoming_user_data = handle_incoming_user_data;
+  app->bindurl = su_sprintf(&app->home, "sip:%s:%d", bindhost, bindport);
   app->nua = nua_create(app->root,
                         sofia_app_nua_callback,
                         app,
-                        NUTAG_URL(details->bindurl),
+                        NUTAG_URL(app->bindurl),
                         TAG_NULL());
   if (!app->nua)
     return false;
