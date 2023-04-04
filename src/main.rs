@@ -4,17 +4,24 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-use std::ffi::CString;
-use std::ffi::c_void;
-use std::sync::{Arc};
+use std::ffi::{CString, CStr};
 use std::sync::Mutex;
-use libc;
+use std::any::Any;
 
-use log::{info, trace, warn};
+use log::{info};
 use simple_logger::SimpleLogger;
 
+#[derive(Debug)]
+struct SofiaAppTag<'a>{
+    ns: &'a str,
+    name: &'a str,
+    value: &'a str
+}
+
+type SofiaAppTags<'a> = Vec<SofiaAppTag<'a>>;
+
 trait ApplicationBehavior {
-    fn handle_incoming(&mut self, event: i32, status: i32, phrase: &str);
+    fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags);
 }
 
 pub struct Application {
@@ -37,8 +44,10 @@ impl Drop for Application {
 pub type sofia_app_handle_incoming_cb = ::std::option::Option<
     unsafe extern "C" fn(
         event: ::std::os::raw::c_int,
+        event_name: *const ::std::os::raw::c_char,
         status: ::std::os::raw::c_int,
         phrase: *const ::std::os::raw::c_char,
+        tags: *mut sofia_app_tag_t,
         user_data: *mut Application
     ),
 >;
@@ -53,8 +62,32 @@ extern "C" {
     ) -> bool;
 }
 
-unsafe extern "C" fn dispatch_handle_incoming(event: i32, status: i32, phrase: *const i8, app: *mut Application) {
-    (*app).handle_incoming(event, status, "hola");
+unsafe extern "C" fn dispatch_handle_incoming(
+    event: i32,
+    event_name: *const i8,
+    status: i32,
+    phrase: *const i8,
+    mut tags: *mut sofia_app_tag_t,
+    app: *mut Application) {
+    let phrase = CStr::from_ptr(phrase).to_str().unwrap();
+    let event_name = CStr::from_ptr(event_name).to_str().unwrap();
+    let mut rtags: SofiaAppTags = SofiaAppTags::new();
+    loop {
+        if !tags.is_null() {
+            let ns = CStr::from_ptr((*tags).ns).to_str().expect("fails to get tag ns");
+            let name = CStr::from_ptr((*tags).name).to_str().expect("fails to get tag name");
+            let value = CStr::from_ptr((*tags).value).to_str().expect("fails to get tag value");
+
+            if name != "tag_null" {
+                rtags.push(SofiaAppTag{ns: ns, name: name, value: value});
+            }
+            tags = (*tags).next;
+        } else {
+            break;
+        }
+    }
+
+    (*app).handle_incoming(event, event_name, status, phrase, rtags);
 }
 
 impl Application {
@@ -70,7 +103,7 @@ impl Application {
 
         unsafe {
             let host = CString::new(host).unwrap();
-            let mut obj = Box::new(self);
+            let obj = Box::new(self);
             let _ = sofia_app_init(app,
                                    host.as_ptr(),
                                    port,
@@ -79,8 +112,8 @@ impl Application {
         }
     }
 
-    fn handle_incoming(&mut self, event: i32, status: i32, phrase: &str) {
-        self.behavior.handle_incoming(event, status, phrase);
+    fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags) {
+        self.behavior.handle_incoming(event, event_name, status, phrase, tags);
     }
 
     fn iterate(&mut self, interval: i64) {
@@ -103,8 +136,7 @@ impl ApplicationBehaviorDumb {
 }
 
 impl ApplicationBehavior for ApplicationBehaviorDumb {
-    fn handle_incoming(&mut self, event: i32, status: i32, phrase: &str) {
-        eprintln!("dumb handle incoming");
+    fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags) {
     }
 }
 
@@ -127,6 +159,26 @@ async fn main() {
 mod tests {
     use super::*;
 
+    #[derive(Clone)]
+    struct ApplicationBehaviorChecker {
+        _last_event: String
+    }
+    impl ApplicationBehaviorChecker {
+        fn new() -> Box<Self> {
+            Box::new(Self{_last_event: "".to_string()})
+        }
+
+        fn last_event(&self) -> &String {
+            &self._last_event
+        }
+    }
+    impl ApplicationBehavior for ApplicationBehaviorChecker {
+        fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags) {
+            eprintln!("CHECKER {}", event_name);
+         self._last_event = event_name.to_string();
+        }
+    }
+
     #[test]
     fn it_sofia_app_check() {
         assert_eq!(
@@ -147,6 +199,21 @@ mod tests {
         let mut app = Application::new(behavior);
         app.init("localhost", 5071);
         app.iterate(100);
+    }
+
+    #[test]
+    fn it_application_behavior_receive_event() {
+        let mut behavior = ApplicationBehaviorChecker::new();
+        let mut app = Application::new(behavior);
+        app.init("localhost", 5072);
+        app.iterate(100);
+        drop(app);
+
+
+        assert_eq!(
+            "nua_r_shutdown",
+            "nua_r_shutdown"
+        );
     }
 
 }

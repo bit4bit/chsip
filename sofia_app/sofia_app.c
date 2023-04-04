@@ -8,7 +8,7 @@ typedef struct sofia_app application;
 
 #include <sofia-sip/nua.h>
 #include <sofia-sip/su.h>
-
+#include <sofia-sip/su_tag_inline.h>
 #include "sofia_app.h"
 
 
@@ -23,6 +23,36 @@ struct sofia_app {
 };
 
 
+static sofia_app_tags_t sofia_app_tl(sofia_app_t *app, tagi_t const tags[]) {
+  sofia_app_tags_t head = (sofia_app_tag_t*)su_alloc(&app->home, sizeof(sofia_app_tag_t));
+  sofia_app_tag_t *next = NULL;
+  for(; tags; tags = tl_next(tags)) {
+    if (!next) {
+      next = head;
+      next->next = NULL;
+    } else {
+      next->next = (sofia_app_tag_t *)su_alloc(&app->home, sizeof(sofia_app_tag_t));
+      next = next->next;
+      next->next = NULL;
+    }
+    
+    //TAKED: su_taglist.c
+    tag_type_t tt = TAG_TYPE_OF(tags);
+    next->ns = su_strdup(&app->home, tt->tt_ns ? tt->tt_ns : "");
+    next->name = su_strdup(&app->home, tt->tt_name ? tt->tt_name : "null");
+
+    char buffer[4096];
+    buffer[0] = '\0';
+    if (tt->tt_snprintf)
+      tt->tt_snprintf(tags, buffer, sizeof(buffer));
+    else
+      snprintf(buffer, sizeof(buffer), "%llx", (long)tags->t_value);
+    next->value = su_strdup(&app->home, buffer);
+  }
+
+  return head;
+}
+
 void sofia_app_nua_callback(
                             nua_event_t event,
                             int status,
@@ -36,11 +66,12 @@ void sofia_app_nua_callback(
 {
 
   if (app->handle_incoming) {
-    app->handle_incoming(event, status, phrase, app->handle_incoming_user_data);
-  }
+    char const *event_name = nua_event_name(event);
+    sofia_app_tag_t *exported_tags = sofia_app_tl(app, tags);
 
-  printf("event %d: %03d %s\n", event, status, phrase);
-  tl_print(stdout, "", tags);
+    app->handle_incoming(event, event_name, status, phrase, exported_tags, app->handle_incoming_user_data);
+    su_free(&app->home, exported_tags);
+  }
 }
 
 int sofia_app_check() {
@@ -113,4 +144,3 @@ void sofia_app_destroy(sofia_app_t **app) {
     *app = NULL;
   }
 }
-
