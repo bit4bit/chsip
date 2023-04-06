@@ -6,7 +6,6 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 use std::ffi::{CString, CStr};
 use std::sync::Mutex;
-use std::any::Any;
 
 use log::{info};
 use simple_logger::SimpleLogger;
@@ -24,14 +23,14 @@ trait ApplicationBehavior {
     fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags);
 }
 
-pub struct Application {
+pub struct Application<'a> {
     internal: Mutex<*mut sofia_app_t>,
-    behavior: Box<dyn ApplicationBehavior>
+    behavior: &'a mut dyn ApplicationBehavior
 }
-unsafe impl Send for Application {}
+unsafe impl Send for Application<'_> {}
 
 
-impl Drop for Application {
+impl Drop for Application<'_> {
     fn drop(&mut self) {
         unsafe {
             let mut app = *self.internal.lock().unwrap();
@@ -90,8 +89,8 @@ unsafe extern "C" fn dispatch_handle_incoming(
     (*app).handle_incoming(event, event_name, status, phrase, rtags);
 }
 
-impl Application {
-    fn new(behavior: Box<dyn ApplicationBehavior>) -> Self {
+impl<'a> Application<'a> {
+    fn new(behavior: &'a mut dyn ApplicationBehavior) -> Self {
         unsafe {
             let app = sofia_app_create();
             Self { internal: Mutex::new(app), behavior: behavior }
@@ -130,8 +129,8 @@ struct ApplicationBehaviorDumb {
 }
 
 impl ApplicationBehaviorDumb {
-    fn new() -> Box<Self> {
-        Box::new(Self {})
+    fn new() -> Self {
+        Self {}
     }
 }
 
@@ -146,8 +145,8 @@ async fn main() {
     info!("starting..");
     //i don't know how, but sofia knows
     //if the iterations runs in another thread
-    let behavior = ApplicationBehaviorDumb::new();
-    let mut app = Application::new(behavior);
+    let mut behavior = ApplicationBehaviorDumb::new();
+    let mut app = Application::new(&mut behavior);
     app.init("localhost", 5070);
     loop {
         //blocks thread
@@ -164,12 +163,12 @@ mod tests {
         _last_event: String
     }
     impl ApplicationBehaviorChecker {
-        fn new() -> Box<Self> {
-            Box::new(Self{_last_event: "".to_string()})
+        fn new() -> Self {
+            Self{_last_event: "".to_string()}
         }
 
-        fn last_event(&self) -> &String {
-            &self._last_event
+        fn last_event(&self) -> String {
+            self._last_event.clone()
         }
     }
     impl ApplicationBehavior for ApplicationBehaviorChecker {
@@ -189,14 +188,14 @@ mod tests {
 
     #[test]
     fn it_application_init() {
-        let behavior = ApplicationBehaviorDumb::new();
-        Application::new(behavior).init("localhost", 5070);
+        let mut behavior = ApplicationBehaviorDumb::new();
+        Application::new(&mut behavior).init("localhost", 5070);
     }
 
     #[test]
     fn it_application_iterate() {
-        let behavior = ApplicationBehaviorDumb::new();
-        let mut app = Application::new(behavior);
+        let mut behavior = ApplicationBehaviorDumb::new();
+        let mut app = Application::new(&mut behavior);
         app.init("localhost", 5071);
         app.iterate(100);
     }
@@ -204,14 +203,15 @@ mod tests {
     #[test]
     fn it_application_behavior_receive_event() {
         let mut behavior = ApplicationBehaviorChecker::new();
-        let mut app = Application::new(behavior);
+        let mut app = Application::new(&mut behavior);
         app.init("localhost", 5072);
         app.iterate(100);
+
         drop(app);
 
-
+        let last_event = behavior.last_event();
         assert_eq!(
-            "nua_r_shutdown",
+            last_event,
             "nua_r_shutdown"
         );
     }
