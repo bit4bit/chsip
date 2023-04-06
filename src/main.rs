@@ -23,8 +23,9 @@ trait ApplicationBehavior {
     fn handle_incoming(&mut self, event: i32, event_name: &str, status: i32, phrase: &str, tags: SofiaAppTags);
 }
 
+#[repr(C)]
 pub struct Application<'a> {
-    internal: Mutex<*mut sofia_app_t>,
+    internal: *mut sofia_app_t,
     behavior: &'a mut dyn ApplicationBehavior
 }
 unsafe impl Send for Application<'_> {}
@@ -33,7 +34,7 @@ unsafe impl Send for Application<'_> {}
 impl Drop for Application<'_> {
     fn drop(&mut self) {
         unsafe {
-            let mut app = *self.internal.lock().unwrap();
+            let mut app = self.internal;
             sofia_app_deinit(app);
             sofia_app_destroy(&mut app);
         }
@@ -93,12 +94,12 @@ impl<'a> Application<'a> {
     fn new(behavior: &'a mut dyn ApplicationBehavior) -> Self {
         unsafe {
             let app = sofia_app_create();
-            Self { internal: Mutex::new(app), behavior: behavior }
+            Self { internal: app, behavior: behavior }
         }
     }
 
     fn init(&mut self, host: &str, port: i32) {
-        let app = *self.internal.lock().unwrap();
+        let app = self.internal;
 
         unsafe {
             let host = CString::new(host).unwrap();
@@ -117,7 +118,7 @@ impl<'a> Application<'a> {
 
     fn iterate(&mut self, interval: i64) {
         unsafe {
-            let app = *self.internal.lock().unwrap();
+            let app = self.internal;
             sofia_app_iterate(app, interval);
         }
     }
